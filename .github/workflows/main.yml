@@ -142,7 +142,9 @@ jobs:
         run: |
           netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
+          dir=in action=allow protocol=TCP localport=3389
+          Get-NetTCPConnection -LocalPort 3389 -State Listen
+
 
       # =========================
       # KEEP ALIVE
