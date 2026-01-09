@@ -1,0 +1,54 @@
+name: BACKUP_ZDNCH
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: ZDNCH BACKUP - Check FiveM Directory
+        shell: pwsh
+        run: |
+          if (!(Test-Path "C:\ZDNCH\apps\fivem")) {
+            Write-Error "FiveM directory not found, nothing to backup"
+            exit 1
+          }
+
+      - name: ZDNCH BACKUP - Create Backup Directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\ZDNCH\backup | Out-Null
+
+      - name: ZDNCH BACKUP - Zip FiveM Data
+        shell: pwsh
+        run: |
+          $date = Get-Date -Format "yyyyMMdd-HHmmss"
+          $zipPath = "C:\ZDNCH\backup\fivem-backup-$date.zip"
+
+          $items = @(
+            "C:\ZDNCH\apps\fivem\server.cfg",
+            "C:\ZDNCH\apps\fivem\resources"
+          )
+
+          Compress-Archive -Path $items -DestinationPath $zipPath -Force
+
+          echo "BACKUP_FILE=$zipPath" >> $env:GITHUB_ENV
+          Write-Host "Backup created at $zipPath"
+
+      - name: ZDNCH BACKUP - Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZDNCH_FIVEM_BACKUP
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 7
+
+      - name: ZDNCH BACKUP - DONE
+        shell: pwsh
+        run: |
+          Write-Host "==========================="
+          Write-Host "BACKUP SUCCESS"
+          Write-Host "Artifact: ZDNCH_FIVEM_BACKUP"
+          Write-Host "==========================="
