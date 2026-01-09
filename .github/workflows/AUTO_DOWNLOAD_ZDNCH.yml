@@ -9,71 +9,74 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: ZDNCH - Prepare FiveM Base Directory
+      - name: ZDNCH - Prepare BLACKHARBOR Directory
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem | Out-Null
-          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem\resources | Out-Null
-          takeown /f C:\ZDNCH /r /d y | Out-Null
-          icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
+          $base = "C:\BLACKHARBOR\fivem"
+          $res  = "$base\resources"
 
-      - name: ZDNCH - Download FXServer Artifact
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
+          New-Item -ItemType Directory -Force -Path $res  | Out-Null
+
+          takeown /f C:\BLACKHARBOR /r /d y | Out-Null
+          icacls C:\BLACKHARBOR /grant Administrators:F /t | Out-Null
+          icacls C:\BLACKHARBOR /grant RDP:F /t | Out-Null
+
+      - name: ZDNCH - Install 7zip (portable)
         shell: pwsh
         run: |
-          $fxDir = "C:\ZDNCH\apps\fivem"
-          if (Test-Path "$fxDir\FXServer.exe") {
-            Write-Host "FXServer already exists, skip download"
+          $bin = "C:\7zr.exe"
+          if (!(Test-Path $bin)) {
+            Invoke-WebRequest https://www.7-zip.org/a/7zr.exe -OutFile $bin
+          }
+
+      - name: ZDNCH - Download FXServer (BLACKHARBOR)
+        shell: pwsh
+        run: |
+          $fxDir = "C:\BLACKHARBOR\fivem"
+          $exe   = "$fxDir\FXServer.exe"
+
+          if (Test-Path $exe) {
+            Write-Host "FXServer already exists, skip"
             exit 0
           }
 
-          Write-Host "Downloading FXServer..."
-          $url = "https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/6546-8e5b4e5d6a6e2f0a2a/server.7z"
-          $archive = "$env:TEMP\fxserver.7z"
+          $url = "https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/24079-679adafe5e79e6d9e517aba4f03443677785e0d7/server.7z"
+          $arc = "$env:TEMP\fxserver.7z"
 
-          Invoke-WebRequest $url -OutFile $archive
+          Invoke-WebRequest $url -OutFile $arc
+          & C:\7zr.exe x $arc "-o$fxDir" -y
+          Remove-Item $arc -Force
 
-          # Extract (Windows runner supports tar for .7z)
-          tar -xf $archive -C $fxDir
-          Remove-Item $archive -Force
+          if (!(Test-Path $exe)) {
+            throw "FXServer.exe NOT FOUND — extract failed"
+          }
 
-      - name: ZDNCH - Download Default Resources (cfx-server-data)
+      - name: ZDNCH - Download Default Resources
         shell: pwsh
         run: |
-          $resDir = "C:\ZDNCH\apps\fivem\resources"
-          if (Test-Path "$resDir\[cfx-server-data]") {
-            Write-Host "Default resources already exist"
+          $target = "C:\BLACKHARBOR\fivem\resources\[cfx-server-data]"
+
+          if (Test-Path $target) {
+            Write-Host "cfx-server-data already exists"
             exit 0
           }
 
-          Write-Host "Cloning cfx-server-data..."
-          git clone https://github.com/citizenfx/cfx-server-data.git "$resDir\[cfx-server-data]"
+          git clone https://github.com/citizenfx/cfx-server-data.git $target
 
-      - name: ZDNCH - (Optional) Download Custom Resources ZIP
+      - name: ZDNCH - Verify BLACKHARBOR
         shell: pwsh
         run: |
-          # === OPTIONAL ===
-          # Kalau lu punya resource ZIP sendiri, isi URL di sini
-          $customZipUrl = ""
-
-          if ($customZipUrl -ne "") {
-            Write-Host "Downloading custom resources..."
-            $zip = "$env:TEMP\custom.zip"
-            Invoke-WebRequest $customZipUrl -OutFile $zip
-            Expand-Archive $zip "C:\ZDNCH\apps\fivem\resources" -Force
-            Remove-Item $zip -Force
-          } else {
-            Write-Host "No custom resource URL provided, skip"
-          }
-
-      - name: ZDNCH - Verify Files
-        shell: pwsh
-        run: |
-          Write-Host "=== VERIFY ==="
-          Get-ChildItem C:\ZDNCH\apps\fivem | Select Name
-          Write-Host "=============="
+          Write-Host "=== VERIFY BLACKHARBOR ==="
+          Test-Path C:\BLACKHARBOR\fivem\FXServer.exe
+          Get-ChildItem C:\BLACKHARBOR\fivem
+          Write-Host "=========================="
 
       - name: ZDNCH - DONE
         shell: pwsh
         run: |
-          Write-Host "AUTO DOWNLOAD COMPLETE"
-          Write-Host "FXServer + resources READY"
+          Write-Host "================================="
+          Write-Host "BLACKHARBOR FiveM READY"
+          Write-Host "Path : C:\BLACKHARBOR\fivem"
+          Write-Host "User : RDP (FULL ACCESS)"
+          Write-Host "================================="
