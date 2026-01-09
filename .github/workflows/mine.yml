@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       setup_crafty:
-        description: "Setup Crafty + Auto Create Paper Server"
+        description: "Setup Crafty + Paper"
         type: boolean
         default: false
 
@@ -30,15 +30,38 @@ jobs:
         sudo apt update -y
         sudo apt upgrade -y
 
-    - name: Base Dependencies
+    # =====================
+    # SSH + USER (BEST EFFORT)
+    # =====================
+    - name: Setup SSH & User (Symbolic)
       run: |
-        sudo apt install -y curl jq openssh-server
+        sudo apt install -y openssh-server
         sudo systemctl enable ssh
         sudo systemctl start ssh
+
+        # create user
+        sudo useradd -m admin || true
+        echo "admin:admin123" | sudo chpasswd
+        sudo usermod -aG sudo admin
+
+        # ssh config (WILL NOT MAKE IT VPS)
+        sudo sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+        sudo sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+        sudo systemctl restart ssh
+
+        echo "USER admin CREATED (NON-PERSISTENT)"
+
+    # =====================
+    # BASE DEPENDENCIES
+    # =====================
+    - name: Base Dependencies
+      run: |
+        sudo apt install -y curl jq
         sudo systemctl start docker
 
     # =====================
-    # TAILSCALE (ALWAYS ON)
+    # TAILSCALE
     # =====================
     - name: Install & Connect Tailscale
       run: |
@@ -48,9 +71,9 @@ jobs:
           --hostname=crafty-zdnch-${{ github.run_id }}
 
     # =====================
-    # PLAYIT (OPTIONAL)
+    # PLAYIT
     # =====================
-    - name: Setup Playit (Docker)
+    - name: Setup Playit
       if: ${{ inputs.setup_playit }}
       run: |
         sudo docker run -d \
@@ -58,13 +81,10 @@ jobs:
           --restart unless-stopped \
           --network host \
           -e SECRET_KEY=${{ secrets.PLAYIT_SECRET_KEY }} \
-          -e AGENT_NAME=mine1 \
           ghcr.io/playit-cloud/playit-agent:0.16
 
-        echo "PLAYIT ACTIVE"
-
     # =====================
-    # CLOUDFLARE (OPTIONAL)
+    # CLOUDFLARE
     # =====================
     - name: Setup Cloudflare Tunnel
       if: ${{ inputs.setup_cloudflare }}
@@ -76,10 +96,8 @@ jobs:
           tunnel --no-autoupdate run \
           --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
 
-        echo "CLOUDFLARE TUNNEL ACTIVE"
-
     # =====================
-    # CRAFTY + PAPER (OPTIONAL)
+    # CRAFTY
     # =====================
     - name: Setup Crafty Controller
       if: ${{ inputs.setup_crafty }}
@@ -90,55 +108,26 @@ jobs:
           --name crafty_container \
           --restart unless-stopped \
           -p 8443:8443 \
-          -p 8123:8123 \
-          -p 19132:19132/udp \
           -p 25500-25600:25500-25600 \
-          -e TZ=Etc/UTC \
-          -v "$PWD/docker/backups:/crafty/backups" \
-          -v "$PWD/docker/logs:/crafty/logs" \
-          -v "$PWD/docker/servers:/crafty/servers" \
-          -v "$PWD/docker/config:/crafty/app/config" \
-          -v "$PWD/docker/import:/crafty/import" \
+          -v "$PWD/docker:/crafty" \
           registry.gitlab.com/crafty-controller/crafty-4:latest
 
-        sleep 20
-
-    - name: Auto Create Paper Server
-      if: ${{ inputs.setup_crafty }}
-      run: |
-        API="https://localhost:8443/api/v2"
-        TOKEN="${{ secrets.CRAFTY_API_TOKEN }}"
-
-        RESPONSE=$(curl -sk -X POST "$API/servers" \
-          -H "Authorization: Bearer $TOKEN" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "name": "ZDNCH-Paper",
-            "type": "minecraft-java",
-            "loader": "paper",
-            "version": "1.21.11",
-            "memory": 2048,
-            "port": 25565,
-            "auto_start": true
-          }')
-
-        echo "$RESPONSE" | jq .
-
     # =====================
-    # FINAL INFO
+    # FINAL + KEEP ALIVE
     # =====================
     - name: FINAL INFO
       run: |
         TS_IP=$(tailscale ip -4 | head -n 1)
 
         echo "========================================"
-        echo "🔥 MANUAL INFRA WORKFLOW DONE 🔥"
+        echo "🔥 WORKFLOW ACTIVE 🔥"
+        echo "Playit     : ${{ inputs.setup_playit }}"
+        echo "Cloudflare : ${{ inputs.setup_cloudflare }}"
+        echo "Crafty     : ${{ inputs.setup_crafty }}"
         echo ""
-        echo "Playit      : ${{ inputs.setup_playit }}"
-        echo "Cloudflare  : ${{ inputs.setup_cloudflare }}"
-        echo "Crafty      : ${{ inputs.setup_crafty }}"
-        echo ""
-        echo "SSH : ssh runner@$TS_IP"
+        echo "SSH (symbolic): ssh admin@$TS_IP"
+        echo "PASS: admin123"
+        echo "⚠️ NOT A VPS ⚠️"
         echo "========================================"
 
         while true; do
