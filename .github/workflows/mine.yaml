@@ -1,4 +1,4 @@
-name: CRAFTY_PAPER_ZDNCH
+name: CRAFTY_PAPER_ZDNCH_AUTO
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
     # =====================
     # SYSTEM
     # =====================
-    - name: ZDNCH - Update System
+    - name: Update System
       run: |
         sudo apt update -y
         sudo apt upgrade -y
@@ -20,24 +20,20 @@ jobs:
     # =====================
     # DEPENDENCIES
     # =====================
-    - name: ZDNCH - Install Dependencies
+    - name: Install Dependencies
       run: |
         sudo apt install -y \
-          curl wget git sudo \
-          python3 python3-pip \
+          curl jq docker.io \
           openjdk-21-jre-headless \
-          openssh-server vsftpd \
-          screen tmux \
-          docker.io jq
+          openssh-server
 
         sudo systemctl enable docker
         sudo systemctl start docker
-        java -version
 
     # =====================
     # SSH
     # =====================
-    - name: ZDNCH - Enable SSH
+    - name: Enable SSH
       run: |
         sudo systemctl enable ssh
         sudo systemctl start ssh
@@ -45,128 +41,109 @@ jobs:
     # =====================
     # TAILSCALE
     # =====================
-    - name: ZDNCH - Install Tailscale
-      run: |
-        curl -fsSL https://tailscale.com/install.sh | sh
+    - name: Install Tailscale
+      run: curl -fsSL https://tailscale.com/install.sh | sh
 
-    - name: ZDNCH - Connect Tailscale
+    - name: Connect Tailscale
       run: |
         sudo tailscale up \
           --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
           --hostname=crafty-zdnch-${{ github.run_id }}
 
     # =====================
-    # PLAYIT (MINECRAFT ONLY)
+    # PLAYIT (DOCKER)
     # =====================
-    - name: ZDNCH - Install Playit
+    - name: Start Playit (Docker)
       run: |
-        curl -fsSL https://playit.gg/install.sh | sudo bash
-
-    - name: ZDNCH - Start Playit
-      run: |
-        sudo nohup playit-agent \
-          --secret ${{ secrets.PLAYIT_AUTH_KEY }} \
-          > /tmp/playit.log 2>&1 &
+        sudo docker run -d \
+          --name playit-agent \
+          --restart unless-stopped \
+          --network host \
+          -e SECRET_KEY=${{ secrets.PLAYIT_SECRET_KEY }} \
+          ghcr.io/playit-cloud/playit-agent:0.16
 
     # =====================
-    # CRAFTY
+    # CRAFTY INSTALL
     # =====================
-    - name: ZDNCH - Install Crafty
-      run: |
-        curl -s https://craftycontrol.com/install.sh | sudo bash
+    - name: Install Crafty
+      run: curl -s https://craftycontrol.com/install.sh | sudo bash
 
-    - name: ZDNCH - Configure Crafty
-      run: |
-        sudo sed -i 's/127.0.0.1/0.0.0.0/g' /opt/crafty/conf/crafty.yaml
+    - name: Configure Crafty Bind
+      run: sudo sed -i 's/127.0.0.1/0.0.0.0/g' /opt/crafty/conf/crafty.yaml
 
-    - name: ZDNCH - Start Crafty
+    - name: Start Crafty
       run: |
         sudo systemctl daemon-reexec
         sudo systemctl enable crafty
         sudo systemctl start crafty
+        sleep 15
 
     # =====================
-    # CLOUDFLARE TUNNEL (CRAFTY)
+    # AUTO-CREATE PAPER SERVER (CRAFTY API)
     # =====================
-    - name: ZDNCH - Start Cloudflare Tunnel
+    - name: Auto Create Paper Server via Crafty API
       run: |
-        sudo docker run -d \
-          --name crafty-cloudflared \
-          --restart unless-stopped \
-          cloudflare/cloudflared:latest \
-          tunnel --no-autoupdate run \
-          --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        CRAFTY_API="http://127.0.0.1:8000/api/v2"
+        TOKEN="${{ secrets.CRAFTY_API_TOKEN }}"
+
+        echo "➡️ Creating Paper server..."
+
+        RESPONSE=$(curl -s -X POST "$CRAFTY_API/servers" \
+          -H "Authorization: Bearer $TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "name": "ZDNCH-Paper",
+            "type": "minecraft-java",
+            "loader": "paper",
+            "version": "1.21.11",
+            "memory": 2048,
+            "port": 25565,
+            "auto_start": true
+          }')
+
+        echo "$RESPONSE" | jq .
+
+        SERVER_ID=$(echo "$RESPONSE" | jq -r '.data.id')
+
+        echo "SERVER_ID=$SERVER_ID" >> $GITHUB_ENV
 
     # =====================
-    # COLLECT RUNTIME INFO (NEXT LEVEL)
+    # START SERVER (SAFETY)
     # =====================
-    - name: ZDNCH - Collect Runtime Info
+    - name: Ensure Paper Server Started
       run: |
-        echo "HOSTNAME=$(hostname)" >> $GITHUB_ENV
-        echo "TAILSCALE_IP=$(tailscale ip -4 | head -n 1)" >> $GITHUB_ENV
-
-        # Crafty status
-        if systemctl is-active --quiet crafty; then
-          echo "CRAFTY_STATUS=RUNNING" >> $GITHUB_ENV
-        else
-          echo "CRAFTY_STATUS=DOWN" >> $GITHUB_ENV
-        fi
-
-        # Paper server count
-        if [ -d /opt/crafty/servers ]; then
-          COUNT=$(find /opt/crafty/servers -mindepth 1 -maxdepth 1 -type d | wc -l)
-        else
-          COUNT=0
-        fi
-        echo "PAPER_SERVER_COUNT=$COUNT" >> $GITHUB_ENV
-
-        # Playit domain (best effort)
-        DOMAIN=$(grep -oE '[a-z0-9\-]+\.playit\.gg' /tmp/playit.log | head -n 1 || true)
-        if [ -z "$DOMAIN" ]; then
-          DOMAIN="CHECK_PLAYIT_DASHBOARD"
-        fi
-        echo "PLAYIT_DOMAIN=$DOMAIN" >> $GITHUB_ENV
-
-        # Java
-        echo "JAVA_VERSION=$(java -version 2>&1 | head -n 1)" >> $GITHUB_ENV
+        curl -X POST \
+          http://127.0.0.1:8000/api/v2/servers/$SERVER_ID/start \
+          -H "Authorization: Bearer ${{ secrets.CRAFTY_API_TOKEN }}"
 
     # =====================
-    # KEEP ALIVE + INFO (FINAL FORM)
+    # KEEP ALIVE + INFO
     # =====================
-    - name: ZDNCH - KEEP ALIVE & ACCESS INFO
+    - name: KEEP ALIVE & INFO
       run: |
-        echo "=============================================="
-        echo "🔥🔥 ZDNCH INFRA — FINAL FORM 🔥🔥"
+        TS_IP=$(tailscale ip -4 | head -n 1)
+
+        echo "========================================"
+        echo "🔥 AUTO PAPER SERVER READY 🔥"
         echo ""
-        echo "🖥️ HOST:"
-        echo "- Hostname    : $HOSTNAME"
-        echo "- TailscaleIP : $TAILSCALE_IP"
+        echo "🛠️ Crafty:"
+        echo "- Panel : Cloudflare Tunnel"
+        echo "- API   : ACTIVE"
         echo ""
-        echo "🛠️ CRAFTY:"
-        echo "- Status      : $CRAFTY_STATUS"
-        echo "- Panel       : Cloudflare Tunnel"
-        echo "- Login       : admin / admin"
+        echo "📦 Paper Server:"
+        echo "- Name  : ZDNCH-Paper"
+        echo "- ID    : $SERVER_ID"
+        echo "- Port  : 25565"
         echo ""
-        echo "📦 PAPER:"
-        echo "- Server Count: $PAPER_SERVER_COUNT"
-        echo "- Control     : FULL via Crafty"
-        echo ""
-        echo "🎮 MINECRAFT:"
-        echo "- Public URL  : $PLAYIT_DOMAIN"
-        echo "- Port        : 25565"
+        echo "🎮 Minecraft:"
+        echo "- Access : Playit"
         echo ""
         echo "🔐 SSH:"
-        echo "- ssh runner@$TAILSCALE_IP"
+        echo "- ssh runner@$TS_IP"
         echo ""
-        echo "☕ JAVA:"
-        echo "- $JAVA_VERSION"
-        echo ""
-        echo "⚠️ NOTES:"
-        echo "- GANTI PASSWORD CRAFTY"
-        echo "- JANGAN START PAPER MANUAL"
-        echo "=============================================="
+        echo "========================================"
 
         while true; do
-          echo "[ZDNCH] Alive | Crafty=$CRAFTY_STATUS | Paper=$PAPER_SERVER_COUNT | $(date)"
+          echo "[ZDNCH] Alive | Server=$SERVER_ID | $(date)"
           sleep 300
         done
