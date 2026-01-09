@@ -19,8 +19,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $res  | Out-Null
 
           takeown /f C:\BLACKHARBOR /r /d y | Out-Null
-          icacls C:\BLACKHARBOR /grant Administrators:F /t | Out-Null
-          icacls C:\BLACKHARBOR /grant RDP:F /t | Out-Null
+          icacls C:\BLACKHARBOR /inheritance:e /t
+          icacls C:\BLACKHARBOR /grant "Users":(OI)(CI)F /t
+          icacls C:\BLACKHARBOR /grant "Administrators":(OI)(CI)F /t
+
 
       - name: ZDNCH - Install 7zip (portable)
         shell: pwsh
