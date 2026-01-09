@@ -29,7 +29,7 @@ jobs:
         run: |
           $bin = "C:\7zr.exe"
           if (!(Test-Path $bin)) {
-            Invoke-WebRequest https://www.7-zip.org/a/7zr.exe -OutFile $bin
+            Invoke-WebRequest "https://www.7-zip.org/a/7zr.exe" -OutFile $bin
           }
 
       - name: ZDNCH - Download FXServer (BLACKHARBOR)
@@ -66,20 +66,6 @@ jobs:
 
           git clone https://github.com/citizenfx/cfx-server-data.git $target
 
-      - name: ZDNCH - Download & Install XAMPP 8.0.30
-        shell: pwsh
-        run: |
-          $installer = "$env:TEMP\xampp-installer.exe"
-          $url = "https://onboardcloud.dl.sourceforge.net/project/xampp/XAMPP%20Windows/8.0.30/xampp-windows-x64-8.0.30-0-VS16-installer.exe"
-
-          if (!(Test-Path "C:\xampp")) {
-            Invoke-WebRequest $url -OutFile $installer
-            Start-Process $installer -ArgumentList "--mode unattended" -Wait
-            Remove-Item $installer -Force
-          } else {
-            Write-Host "XAMPP already installed, skip"
-          }
-
       - name: ZDNCH - Verify BLACKHARBOR
         shell: pwsh
         run: |
@@ -93,7 +79,6 @@ jobs:
         run: |
           Write-Host "================================="
           Write-Host "BLACKHARBOR FiveM READY"
-          Write-Host "FX Path  : C:\BLACKHARBOR\fivem"
-          Write-Host "XAMPP    : C:\xampp"
-          Write-Host "Access   : Users / Administrators (FULL)"
+          Write-Host "FX Path : C:\BLACKHARBOR\fivem"
+          Write-Host "Access  : Users / Administrators (FULL)"
           Write-Host "================================="
