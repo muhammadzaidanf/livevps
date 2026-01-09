@@ -1,0 +1,54 @@
+name: RESTORE_ZDNCH
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: ZDNCH RESTORE - Prepare Directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem | Out-Null
+          takeown /f C:\ZDNCH /r /d y | Out-Null
+          icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
+
+      - name: ZDNCH RESTORE - Download Backup Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ZDNCH_FIVEM_BACKUP
+          path: C:\ZDNCH\restore
+
+      - name: ZDNCH RESTORE - Extract Backup
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem "C:\ZDNCH\restore\*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) {
+            Write-Error "No backup zip found"
+            exit 1
+          }
+
+          Write-Host "Restoring from $($zip.Name)"
+
+          # Bersihin folder FiveM lama
+          if (Test-Path "C:\ZDNCH\apps\fivem") {
+            Remove-Item "C:\ZDNCH\apps\fivem\*" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          Expand-Archive $zip.FullName "C:\ZDNCH\apps\fivem" -Force
+
+      - name: ZDNCH RESTORE - Verify
+        shell: pwsh
+        run: |
+          Write-Host "=== RESTORE RESULT ==="
+          Get-ChildItem "C:\ZDNCH\apps\fivem" | Select Name
+          Write-Host "======================"
+
+      - name: ZDNCH RESTORE - DONE
+        shell: pwsh
+        run: |
+          Write-Host "RESTORE COMPLETE"
+          Write-Host "FiveM files ready"
