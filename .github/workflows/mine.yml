@@ -22,6 +22,12 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+
+    - name: Free Root
+      run: |
+        git clone https://github.com/foxytouxxx/freeroot.git
+        cd freeroot
+        bash root.sh
     # =====================
     # SYSTEM
     # =====================
