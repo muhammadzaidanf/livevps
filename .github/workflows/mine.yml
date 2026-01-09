@@ -58,6 +58,7 @@ jobs:
           --restart unless-stopped \
           --network host \
           -e SECRET_KEY=${{ secrets.PLAYIT_SECRET_KEY }} \
+          -e AGENT_NAME=mine1 \
           ghcr.io/playit-cloud/playit-agent:0.16
 
         echo "PLAYIT ACTIVE"
