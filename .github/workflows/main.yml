@@ -99,9 +99,21 @@ jobs:
       - name: ZDNCH - Show Public IP
         shell: pwsh
         run: |
-          $pub = (Invoke-WebRequest -UseBasicParsing ifconfig.me).Content.Trim()
-          echo "PUBLIC_IP=$pub" >> $env:GITHUB_ENV
-          Write-Host "Public IP: $pub"
+          try {
+            $pub = (Invoke-WebRequest -UseBasicParsing https://api.ipify.org).Content.Trim()
+
+            if ($pub -match '^\d{1,3}(\.\d{1,3}){3}$') {
+              echo "PUBLIC_IP=$pub" >> $env:GITHUB_ENV
+              Write-Host "Public IP: $pub"
+            } else {
+              throw "Invalid IP response: $pub"
+            }
+
+          } catch {
+            Write-Error "Failed to fetch public IP"
+          }
+
+
 
       - name: ZDNCH - Keep Alive
         shell: pwsh
