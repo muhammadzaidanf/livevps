@@ -1,0 +1,79 @@
+name: AUTO_DOWNLOAD_ZDNCH
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-deps:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: ZDNCH - Prepare FiveM Base Directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem | Out-Null
+          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem\resources | Out-Null
+          takeown /f C:\ZDNCH /r /d y | Out-Null
+          icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
+
+      - name: ZDNCH - Download FXServer Artifact
+        shell: pwsh
+        run: |
+          $fxDir = "C:\ZDNCH\apps\fivem"
+          if (Test-Path "$fxDir\FXServer.exe") {
+            Write-Host "FXServer already exists, skip download"
+            exit 0
+          }
+
+          Write-Host "Downloading FXServer..."
+          $url = "https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/6546-8e5b4e5d6a6e2f0a2a/server.7z"
+          $archive = "$env:TEMP\fxserver.7z"
+
+          Invoke-WebRequest $url -OutFile $archive
+
+          # Extract (Windows runner supports tar for .7z)
+          tar -xf $archive -C $fxDir
+          Remove-Item $archive -Force
+
+      - name: ZDNCH - Download Default Resources (cfx-server-data)
+        shell: pwsh
+        run: |
+          $resDir = "C:\ZDNCH\apps\fivem\resources"
+          if (Test-Path "$resDir\[cfx-server-data]") {
+            Write-Host "Default resources already exist"
+            exit 0
+          }
+
+          Write-Host "Cloning cfx-server-data..."
+          git clone https://github.com/citizenfx/cfx-server-data.git "$resDir\[cfx-server-data]"
+
+      - name: ZDNCH - (Optional) Download Custom Resources ZIP
+        shell: pwsh
+        run: |
+          # === OPTIONAL ===
+          # Kalau lu punya resource ZIP sendiri, isi URL di sini
+          $customZipUrl = ""
+
+          if ($customZipUrl -ne "") {
+            Write-Host "Downloading custom resources..."
+            $zip = "$env:TEMP\custom.zip"
+            Invoke-WebRequest $customZipUrl -OutFile $zip
+            Expand-Archive $zip "C:\ZDNCH\apps\fivem\resources" -Force
+            Remove-Item $zip -Force
+          } else {
+            Write-Host "No custom resource URL provided, skip"
+          }
+
+      - name: ZDNCH - Verify Files
+        shell: pwsh
+        run: |
+          Write-Host "=== VERIFY ==="
+          Get-ChildItem C:\ZDNCH\apps\fivem | Select Name
+          Write-Host "=============="
+
+      - name: ZDNCH - DONE
+        shell: pwsh
+        run: |
+          Write-Host "AUTO DOWNLOAD COMPLETE"
+          Write-Host "FXServer + resources READY"
