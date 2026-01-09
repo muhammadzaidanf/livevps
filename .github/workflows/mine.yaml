@@ -1,7 +1,20 @@
-name: CRAFTY_PAPER_ZDNCH
+name: CRAFTY_PAPER_ZDNCH_MANUAL
 
 on:
   workflow_dispatch:
+    inputs:
+      setup_playit:
+        description: "Setup Playit (Minecraft Public Access)"
+        type: boolean
+        default: false
+      setup_cloudflare:
+        description: "Setup Cloudflare Tunnel (Crafty Panel)"
+        type: boolean
+        default: false
+      setup_crafty:
+        description: "Setup Crafty + Auto Create Paper Server"
+        type: boolean
+        default: false
 
 jobs:
   infra:
@@ -17,35 +30,28 @@ jobs:
         sudo apt update -y
         sudo apt upgrade -y
 
-    # =====================
-    # BASE DEPENDENCIES
-    # =====================
-    - name: Install Dependencies
+    - name: Base Dependencies
       run: |
         sudo apt install -y curl jq openssh-server
         sudo systemctl enable ssh
         sudo systemctl start ssh
-
-        # Docker SUDAH ADA di runner
         sudo systemctl start docker
-        docker --version
 
     # =====================
-    # TAILSCALE
+    # TAILSCALE (ALWAYS ON)
     # =====================
-    - name: Install Tailscale
-      run: curl -fsSL https://tailscale.com/install.sh | sh
-
-    - name: Connect Tailscale
+    - name: Install & Connect Tailscale
       run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
         sudo tailscale up \
           --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
           --hostname=crafty-zdnch-${{ github.run_id }}
 
     # =====================
-    # PLAYIT (DOCKER)
+    # PLAYIT (OPTIONAL)
     # =====================
-    - name: Start Playit (Docker)
+    - name: Setup Playit (Docker)
+      if: ${{ inputs.setup_playit }}
       run: |
         sudo docker run -d \
           --name playit-agent \
@@ -54,10 +60,28 @@ jobs:
           -e SECRET_KEY=${{ secrets.PLAYIT_SECRET_KEY }} \
           ghcr.io/playit-cloud/playit-agent:0.16
 
+        echo "PLAYIT ACTIVE"
+
     # =====================
-    # CRAFTY 4 (DOCKER - OFFICIAL)
+    # CLOUDFLARE (OPTIONAL)
     # =====================
-    - name: Start Crafty Controller (Docker)
+    - name: Setup Cloudflare Tunnel
+      if: ${{ inputs.setup_cloudflare }}
+      run: |
+        sudo docker run -d \
+          --name crafty-cloudflared \
+          --restart unless-stopped \
+          cloudflare/cloudflared:latest \
+          tunnel --no-autoupdate run \
+          --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+
+        echo "CLOUDFLARE TUNNEL ACTIVE"
+
+    # =====================
+    # CRAFTY + PAPER (OPTIONAL)
+    # =====================
+    - name: Setup Crafty Controller
+      if: ${{ inputs.setup_crafty }}
       run: |
         mkdir -p docker/{backups,logs,servers,config,import}
 
@@ -78,22 +102,8 @@ jobs:
 
         sleep 20
 
-    # =====================
-    # CLOUDFLARE TUNNEL (CRAFTY PANEL)
-    # =====================
-    - name: Start Cloudflare Tunnel (Crafty)
-      run: |
-        sudo docker run -d \
-          --name crafty-cloudflared \
-          --restart unless-stopped \
-          cloudflare/cloudflared:latest \
-          tunnel --no-autoupdate run \
-          --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-
-    # =====================
-    # AUTO-CREATE PAPER SERVER (CRAFTY API)
-    # =====================
     - name: Auto Create Paper Server
+      if: ${{ inputs.setup_crafty }}
       run: |
         API="https://localhost:8443/api/v2"
         TOKEN="${{ secrets.CRAFTY_API_TOKEN }}"
@@ -112,31 +122,22 @@ jobs:
           }')
 
         echo "$RESPONSE" | jq .
-        echo "SERVER_ID=$(echo $RESPONSE | jq -r '.data.id')" >> $GITHUB_ENV
 
     # =====================
-    # KEEP ALIVE + INFO
+    # FINAL INFO
     # =====================
-    - name: KEEP ALIVE & INFO
+    - name: FINAL INFO
       run: |
         TS_IP=$(tailscale ip -4 | head -n 1)
 
         echo "========================================"
-        echo "🔥 CRAFTY 4 + PAPER READY 🔥"
+        echo "🔥 MANUAL INFRA WORKFLOW DONE 🔥"
         echo ""
-        echo "🛠 Crafty Panel:"
-        echo "- https://<cloudflare-domain>"
-        echo "- Port local : 8443"
+        echo "Playit      : ${{ inputs.setup_playit }}"
+        echo "Cloudflare  : ${{ inputs.setup_cloudflare }}"
+        echo "Crafty      : ${{ inputs.setup_crafty }}"
         echo ""
-        echo "📦 Paper:"
-        echo "- Server ID : $SERVER_ID"
-        echo "- Control   : FULL via Crafty"
-        echo ""
-        echo "🎮 Minecraft:"
-        echo "- Public via Playit"
-        echo ""
-        echo "🔐 SSH:"
-        echo "- ssh runner@$TS_IP"
+        echo "SSH : ssh runner@$TS_IP"
         echo "========================================"
 
         while true; do
