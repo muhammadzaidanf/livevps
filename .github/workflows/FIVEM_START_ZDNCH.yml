@@ -1,0 +1,72 @@
+name: FIVEM_START_ZDNCH
+
+on:
+  workflow_dispatch:
+
+jobs:
+  start-fivem:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: ZDNCH - Prepare FiveM Directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\ZDNCH\apps\fivem | Out-Null
+          takeown /f C:\ZDNCH /r /d y | Out-Null
+          icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
+
+      - name: ZDNCH - Download FXServer (Artifacts)
+        shell: pwsh
+        run: |
+          $fxDir="C:\ZDNCH\apps\fivem"
+          if (!(Test-Path "$fxDir\FXServer.exe")) {
+            Write-Host "Downloading FXServer..."
+            $url="https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/6546-8e5b4e5d6a6e2f0a2a/server.7z"
+            $zip="$env:TEMP\fx.7z"
+            Invoke-WebRequest $url -OutFile $zip
+            Expand-Archive $zip $fxDir -Force
+            Remove-Item $zip -Force
+          } else {
+            Write-Host "FXServer already exists"
+          }
+
+      - name: ZDNCH - Create Minimal server.cfg
+        shell: pwsh
+        run: |
+          $cfg = @"
+endpoint_add_tcp "0.0.0.0:40120"
+endpoint_add_udp "0.0.0.0:40120"
+
+sv_hostname "ZDNCH DEV FiveM"
+sv_maxclients 3
+sets tags "zdnch,dev"
+
+sv_licenseKey changeme
+"@
+          $cfg | Out-File -Encoding ascii C:\ZDNCH\apps\fivem\server.cfg -Force
+
+      - name: ZDNCH - Open FiveM Firewall
+        shell: pwsh
+        run: |
+          netsh advfirewall firewall delete rule name="FiveM-40120" | Out-Null
+          netsh advfirewall firewall add rule name="FiveM-40120" `
+            dir=in action=allow protocol=UDP localport=40120
+          netsh advfirewall firewall add rule name="FiveM-40120-TCP" `
+            dir=in action=allow protocol=TCP localport=40120
+
+      - name: ZDNCH - Start FXServer (Detached)
+        shell: pwsh
+        run: |
+          $fx="C:\ZDNCH\apps\fivem\FXServer.exe"
+          Start-Process -FilePath $fx `
+            -ArgumentList "+exec server.cfg" `
+            -WorkingDirectory "C:\ZDNCH\apps\fivem" `
+            -WindowStyle Hidden
+
+      - name: ZDNCH - Status
+        shell: pwsh
+        run: |
+          Start-Sleep 5
+          Get-Process FXServer -ErrorAction SilentlyContinue
+          Write-Host "FiveM STARTED on port 40120"
