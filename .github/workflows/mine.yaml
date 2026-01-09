@@ -1,4 +1,4 @@
-name: CRAFTY_PAPER_ZDNCH_AUTO
+name: CRAFTY_PAPER_ZDNCH
 
 on:
   workflow_dispatch:
@@ -18,24 +18,17 @@ jobs:
         sudo apt upgrade -y
 
     # =====================
-    # DEPENDENCIES
+    # BASE DEPENDENCIES
     # =====================
     - name: Install Dependencies
       run: |
-        sudo apt install -y \
-          openjdk-21-jre-headless \
-          openssh-server
-
-        sudo systemctl enable docker
-        sudo systemctl start docker
-
-    # =====================
-    # SSH
-    # =====================
-    - name: Enable SSH
-      run: |
+        sudo apt install -y curl jq openssh-server
         sudo systemctl enable ssh
         sudo systemctl start ssh
+
+        # Docker SUDAH ADA di runner
+        sudo systemctl start docker
+        docker --version
 
     # =====================
     # TAILSCALE
@@ -62,32 +55,50 @@ jobs:
           ghcr.io/playit-cloud/playit-agent:0.16
 
     # =====================
-    # CRAFTY INSTALL
+    # CRAFTY 4 (DOCKER - OFFICIAL)
     # =====================
-    - name: Install Crafty
-      run: curl -s https://craftycontrol.com/install.sh | sudo bash
-
-    - name: Configure Crafty Bind
-      run: sudo sed -i 's/127.0.0.1/0.0.0.0/g' /opt/crafty/conf/crafty.yaml
-
-    - name: Start Crafty
+    - name: Start Crafty Controller (Docker)
       run: |
-        sudo systemctl daemon-reexec
-        sudo systemctl enable crafty
-        sudo systemctl start crafty
-        sleep 15
+        mkdir -p docker/{backups,logs,servers,config,import}
+
+        sudo docker run -d \
+          --name crafty_container \
+          --restart unless-stopped \
+          -p 8443:8443 \
+          -p 8123:8123 \
+          -p 19132:19132/udp \
+          -p 25500-25600:25500-25600 \
+          -e TZ=Etc/UTC \
+          -v "$PWD/docker/backups:/crafty/backups" \
+          -v "$PWD/docker/logs:/crafty/logs" \
+          -v "$PWD/docker/servers:/crafty/servers" \
+          -v "$PWD/docker/config:/crafty/app/config" \
+          -v "$PWD/docker/import:/crafty/import" \
+          registry.gitlab.com/crafty-controller/crafty-4:latest
+
+        sleep 20
+
+    # =====================
+    # CLOUDFLARE TUNNEL (CRAFTY PANEL)
+    # =====================
+    - name: Start Cloudflare Tunnel (Crafty)
+      run: |
+        sudo docker run -d \
+          --name crafty-cloudflared \
+          --restart unless-stopped \
+          cloudflare/cloudflared:latest \
+          tunnel --no-autoupdate run \
+          --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
 
     # =====================
     # AUTO-CREATE PAPER SERVER (CRAFTY API)
     # =====================
-    - name: Auto Create Paper Server via Crafty API
+    - name: Auto Create Paper Server
       run: |
-        CRAFTY_API="http://127.0.0.1:8000/api/v2"
+        API="https://localhost:8443/api/v2"
         TOKEN="${{ secrets.CRAFTY_API_TOKEN }}"
 
-        echo "➡️ Creating Paper server..."
-
-        RESPONSE=$(curl -s -X POST "$CRAFTY_API/servers" \
+        RESPONSE=$(curl -sk -X POST "$API/servers" \
           -H "Authorization: Bearer $TOKEN" \
           -H "Content-Type: application/json" \
           -d '{
@@ -101,19 +112,7 @@ jobs:
           }')
 
         echo "$RESPONSE" | jq .
-
-        SERVER_ID=$(echo "$RESPONSE" | jq -r '.data.id')
-
-        echo "SERVER_ID=$SERVER_ID" >> $GITHUB_ENV
-
-    # =====================
-    # START SERVER (SAFETY)
-    # =====================
-    - name: Ensure Paper Server Started
-      run: |
-        curl -X POST \
-          http://127.0.0.1:8000/api/v2/servers/$SERVER_ID/start \
-          -H "Authorization: Bearer ${{ secrets.CRAFTY_API_TOKEN }}"
+        echo "SERVER_ID=$(echo $RESPONSE | jq -r '.data.id')" >> $GITHUB_ENV
 
     # =====================
     # KEEP ALIVE + INFO
@@ -123,26 +122,24 @@ jobs:
         TS_IP=$(tailscale ip -4 | head -n 1)
 
         echo "========================================"
-        echo "🔥 AUTO PAPER SERVER READY 🔥"
+        echo "🔥 CRAFTY 4 + PAPER READY 🔥"
         echo ""
-        echo "🛠️ Crafty:"
-        echo "- Panel : Cloudflare Tunnel"
-        echo "- API   : ACTIVE"
+        echo "🛠 Crafty Panel:"
+        echo "- https://<cloudflare-domain>"
+        echo "- Port local : 8443"
         echo ""
-        echo "📦 Paper Server:"
-        echo "- Name  : ZDNCH-Paper"
-        echo "- ID    : $SERVER_ID"
-        echo "- Port  : 25565"
+        echo "📦 Paper:"
+        echo "- Server ID : $SERVER_ID"
+        echo "- Control   : FULL via Crafty"
         echo ""
         echo "🎮 Minecraft:"
-        echo "- Access : Playit"
+        echo "- Public via Playit"
         echo ""
         echo "🔐 SSH:"
         echo "- ssh runner@$TS_IP"
-        echo ""
         echo "========================================"
 
         while true; do
-          echo "[ZDNCH] Alive | Server=$SERVER_ID | $(date)"
+          echo "[ZDNCH] Alive $(date)"
           sleep 300
         done
