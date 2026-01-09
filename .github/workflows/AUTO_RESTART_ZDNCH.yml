@@ -1,0 +1,60 @@
+name: AUTO_RESTART_ZDNCH
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"   # cek tiap 5 menit
+
+jobs:
+  auto-restart:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: ZDNCH AUTO RESTART - Check FXServer
+        shell: pwsh
+        run: |
+          Write-Host "== CHECK FXSERVER =="
+
+          $fx = Get-Process FXServer -ErrorAction SilentlyContinue
+
+          if ($fx) {
+            Write-Host "FXServer RUNNING (PID $($fx.Id))"
+            exit 0
+          }
+
+          Write-Host "FXServer NOT RUNNING - RESTARTING..."
+
+      - name: ZDNCH AUTO RESTART - Start FXServer
+        shell: pwsh
+        run: |
+          $fxPath = "C:\ZDNCH\apps\fivem\FXServer.exe"
+          $cfgPath = "C:\ZDNCH\apps\fivem\server.cfg"
+
+          if (!(Test-Path $fxPath)) {
+            Write-Error "FXServer.exe not found"
+            exit 1
+          }
+
+          if (!(Test-Path $cfgPath)) {
+            Write-Error "server.cfg not found"
+            exit 1
+          }
+
+          Start-Process -FilePath $fxPath `
+            -ArgumentList "+exec server.cfg" `
+            -WorkingDirectory "C:\ZDNCH\apps\fivem" `
+            -WindowStyle Hidden
+
+          Write-Host "FXServer restarted"
+
+      - name: ZDNCH AUTO RESTART - Verify
+        shell: pwsh
+        run: |
+          Start-Sleep 5
+          $fx = Get-Process FXServer -ErrorAction SilentlyContinue
+          if ($fx) {
+            Write-Host "RESTART SUCCESS (PID $($fx.Id))"
+          } else {
+            Write-Error "RESTART FAILED"
+          }
