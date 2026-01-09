@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: ZDNCH DEV - Enable RDP Core
+      - name: ZDNCH - Enable RDP Core
         shell: pwsh
         run: |
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -22,7 +22,7 @@ jobs:
 
           Restart-Service TermService -Force
 
-      - name: ZDNCH DEV - Kill Unneeded Services (Safe)
+      - name: ZDNCH - Kill Unneeded Services (Safe)
         shell: pwsh
         run: |
           # IIS OFF
@@ -49,20 +49,20 @@ jobs:
           Stop-Service WSearch -Force -ErrorAction SilentlyContinue
           Set-Service WSearch -StartupType Disabled
 
-          # Defender soften
+          # Defender soften (runner only)
           Set-MpPreference -DisableRealtimeMonitoring $true
           Set-MpPreference -DisableBehaviorMonitoring $true
           Set-MpPreference -DisableIOAVProtection $true
           Set-MpPreference -DisableBlockAtFirstSeen $true
 
-      - name: ZDNCH DEV - Prepare Work Directories
+      - name: ZDNCH - Prepare Work Directory
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path C:\ZDNCH | Out-Null
           takeown /f C:\ZDNCH /r /d y | Out-Null
           icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
 
-      - name: ZDNCH DEV - Create RDP User
+      - name: ZDNCH - Create RDP User
         shell: pwsh
         run: |
           $chars = @{
@@ -70,6 +70,7 @@ jobs:
             N=[char[]](48..57)
             S=([char[]](33..47)+[char[]](58..64)+[char[]](91..96)+[char[]](123..126))
           }
+
           $p=@()
           $p+=$chars.U|Get-Random -Count 4
           $p+=$chars.L|Get-Random -Count 4
@@ -81,33 +82,35 @@ jobs:
           if(-not(Get-LocalUser RDP -ErrorAction SilentlyContinue)){
             New-LocalUser RDP -Password $sec -AccountNeverExpires
           }
+
           Add-LocalGroupMember Administrators RDP -ErrorAction SilentlyContinue
           Add-LocalGroupMember "Remote Desktop Users" RDP -ErrorAction SilentlyContinue
 
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: ZDNCH DEV - Open Public RDP Firewall
+      - name: ZDNCH - Open Public RDP Firewall
         shell: pwsh
         run: |
           netsh advfirewall firewall delete rule name="RDP-PUBLIC" | Out-Null
           netsh advfirewall firewall add rule name="RDP-PUBLIC" `
-            dir=in action=allow protocol=TCP localport=3389 remoteip=0.0.0.0/0
+            dir=in action=allow protocol=TCP localport=3389 remoteip=any
 
-      - name: ZDNCH DEV - Show Public IP
+      - name: ZDNCH - Show Public IP
         shell: pwsh
         run: |
-          $pub = (Invoke-WebRequest -UseBasicParsing ifconfig.me).Content
+          $pub = (Invoke-WebRequest -UseBasicParsing ifconfig.me).Content.Trim()
           echo "PUBLIC_IP=$pub" >> $env:GITHUB_ENV
           Write-Host "Public IP: $pub"
 
-      - name: ZDNCH DEV - Keep Alive
+      - name: ZDNCH - Keep Alive
         shell: pwsh
         run: |
-          Write-Host "=== RDP_ZDNCH READY (PUBLIC) ==="
+          Write-Host "==============================="
+          Write-Host "RDP_ZDNCH READY (PUBLIC)"
           Write-Host "IP   : $env:PUBLIC_IP"
           Write-Host "Port : 3389"
           Write-Host "User : $env:RDP_USER"
           Write-Host "Pass : $env:RDP_PASS"
-          Write-Host "================================"
-          while($true){ Start-Sleep 300 }
+          Write-Host "==============================="
+          while ($true) { Start-Sleep 300 }
