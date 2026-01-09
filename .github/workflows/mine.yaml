@@ -1,0 +1,172 @@
+name: CRAFTY_PAPER_ZDNCH
+
+on:
+  workflow_dispatch:
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+    # =====================
+    # SYSTEM
+    # =====================
+    - name: ZDNCH - Update System
+      run: |
+        sudo apt update -y
+        sudo apt upgrade -y
+
+    # =====================
+    # DEPENDENCIES
+    # =====================
+    - name: ZDNCH - Install Dependencies
+      run: |
+        sudo apt install -y \
+          curl wget git sudo \
+          python3 python3-pip \
+          openjdk-21-jre-headless \
+          openssh-server vsftpd \
+          screen tmux \
+          docker.io jq
+
+        sudo systemctl enable docker
+        sudo systemctl start docker
+        java -version
+
+    # =====================
+    # SSH
+    # =====================
+    - name: ZDNCH - Enable SSH
+      run: |
+        sudo systemctl enable ssh
+        sudo systemctl start ssh
+
+    # =====================
+    # TAILSCALE
+    # =====================
+    - name: ZDNCH - Install Tailscale
+      run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+
+    - name: ZDNCH - Connect Tailscale
+      run: |
+        sudo tailscale up \
+          --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
+          --hostname=crafty-zdnch-${{ github.run_id }}
+
+    # =====================
+    # PLAYIT (MINECRAFT ONLY)
+    # =====================
+    - name: ZDNCH - Install Playit
+      run: |
+        curl -fsSL https://playit.gg/install.sh | sudo bash
+
+    - name: ZDNCH - Start Playit
+      run: |
+        sudo nohup playit-agent \
+          --secret ${{ secrets.PLAYIT_AUTH_KEY }} \
+          > /tmp/playit.log 2>&1 &
+
+    # =====================
+    # CRAFTY
+    # =====================
+    - name: ZDNCH - Install Crafty
+      run: |
+        curl -s https://craftycontrol.com/install.sh | sudo bash
+
+    - name: ZDNCH - Configure Crafty
+      run: |
+        sudo sed -i 's/127.0.0.1/0.0.0.0/g' /opt/crafty/conf/crafty.yaml
+
+    - name: ZDNCH - Start Crafty
+      run: |
+        sudo systemctl daemon-reexec
+        sudo systemctl enable crafty
+        sudo systemctl start crafty
+
+    # =====================
+    # CLOUDFLARE TUNNEL (CRAFTY)
+    # =====================
+    - name: ZDNCH - Start Cloudflare Tunnel
+      run: |
+        sudo docker run -d \
+          --name crafty-cloudflared \
+          --restart unless-stopped \
+          cloudflare/cloudflared:latest \
+          tunnel --no-autoupdate run \
+          --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+
+    # =====================
+    # COLLECT RUNTIME INFO (NEXT LEVEL)
+    # =====================
+    - name: ZDNCH - Collect Runtime Info
+      run: |
+        echo "HOSTNAME=$(hostname)" >> $GITHUB_ENV
+        echo "TAILSCALE_IP=$(tailscale ip -4 | head -n 1)" >> $GITHUB_ENV
+
+        # Crafty status
+        if systemctl is-active --quiet crafty; then
+          echo "CRAFTY_STATUS=RUNNING" >> $GITHUB_ENV
+        else
+          echo "CRAFTY_STATUS=DOWN" >> $GITHUB_ENV
+        fi
+
+        # Paper server count
+        if [ -d /opt/crafty/servers ]; then
+          COUNT=$(find /opt/crafty/servers -mindepth 1 -maxdepth 1 -type d | wc -l)
+        else
+          COUNT=0
+        fi
+        echo "PAPER_SERVER_COUNT=$COUNT" >> $GITHUB_ENV
+
+        # Playit domain (best effort)
+        DOMAIN=$(grep -oE '[a-z0-9\-]+\.playit\.gg' /tmp/playit.log | head -n 1 || true)
+        if [ -z "$DOMAIN" ]; then
+          DOMAIN="CHECK_PLAYIT_DASHBOARD"
+        fi
+        echo "PLAYIT_DOMAIN=$DOMAIN" >> $GITHUB_ENV
+
+        # Java
+        echo "JAVA_VERSION=$(java -version 2>&1 | head -n 1)" >> $GITHUB_ENV
+
+    # =====================
+    # KEEP ALIVE + INFO (FINAL FORM)
+    # =====================
+    - name: ZDNCH - KEEP ALIVE & ACCESS INFO
+      run: |
+        echo "=============================================="
+        echo "🔥🔥 ZDNCH INFRA — FINAL FORM 🔥🔥"
+        echo ""
+        echo "🖥️ HOST:"
+        echo "- Hostname    : $HOSTNAME"
+        echo "- TailscaleIP : $TAILSCALE_IP"
+        echo ""
+        echo "🛠️ CRAFTY:"
+        echo "- Status      : $CRAFTY_STATUS"
+        echo "- Panel       : Cloudflare Tunnel"
+        echo "- Login       : admin / admin"
+        echo ""
+        echo "📦 PAPER:"
+        echo "- Server Count: $PAPER_SERVER_COUNT"
+        echo "- Control     : FULL via Crafty"
+        echo ""
+        echo "🎮 MINECRAFT:"
+        echo "- Public URL  : $PLAYIT_DOMAIN"
+        echo "- Port        : 25565"
+        echo ""
+        echo "🔐 SSH:"
+        echo "- ssh runner@$TAILSCALE_IP"
+        echo ""
+        echo "☕ JAVA:"
+        echo "- $JAVA_VERSION"
+        echo ""
+        echo "⚠️ NOTES:"
+        echo "- GANTI PASSWORD CRAFTY"
+        echo "- JANGAN START PAPER MANUAL"
+        echo "=============================================="
+
+        while true; do
+          echo "[ZDNCH] Alive | Crafty=$CRAFTY_STATUS | Paper=$PAPER_SERVER_COUNT | $(date)"
+          sleep 300
+        done
