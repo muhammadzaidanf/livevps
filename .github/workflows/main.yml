@@ -4,11 +4,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  rdp-public:
+  rdp-zdnch:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
+      # =========================
+      # ENABLE RDP
+      # =========================
       - name: ZDNCH - Enable RDP Core
         shell: pwsh
         run: |
@@ -17,24 +20,36 @@ jobs:
 
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name UserAuthentication -Value 0 -Force
+
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name SecurityLayer -Value 0 -Force
 
           Restart-Service TermService -Force
 
+      # =========================
+      # HARDENING (SAFE)
+      # =========================
       - name: ZDNCH - Kill Unneeded Services (Safe)
         shell: pwsh
         run: |
           iisreset /stop | Out-Null
-          Stop-Service W3SVC,WAS -Force -ErrorAction SilentlyContinue
-          Set-Service W3SVC,WAS -StartupType Disabled
+
+          "w3svc","was" | ForEach-Object {
+            Stop-Service $_ -Force -ErrorAction SilentlyContinue
+            Set-Service $_ -StartupType Disabled
+          }
+
           dism /online /disable-feature /featurename:IIS-WebServerRole /norestart
 
-          Stop-Service wuauserv,UsoSvc -Force -ErrorAction SilentlyContinue
-          Set-Service wuauserv,UsoSvc -StartupType Disabled
+          "wuauserv","usosvc" | ForEach-Object {
+            Stop-Service $_ -Force -ErrorAction SilentlyContinue
+            Set-Service $_ -StartupType Disabled
+          }
 
-          Stop-Service DiagTrack,dmwappushservice -Force -ErrorAction SilentlyContinue
-          Set-Service DiagTrack,dmwappushservice -StartupType Disabled
+          "DiagTrack","dmwappushservice" | ForEach-Object {
+            Stop-Service $_ -Force -ErrorAction SilentlyContinue
+            Set-Service $_ -StartupType Disabled
+          }
 
           Stop-Service WSearch -Force -ErrorAction SilentlyContinue
           Set-Service WSearch -StartupType Disabled
@@ -44,23 +59,28 @@ jobs:
           Set-MpPreference -DisableIOAVProtection $true
           Set-MpPreference -DisableBlockAtFirstSeen $true
 
+      # =========================
+      # CREATE RDP USER
+      # =========================
       - name: ZDNCH - Create RDP User
         shell: pwsh
         run: |
           $chars = @{
-            U=[char[]](65..90); L=[char[]](97..122)
+            U=[char[]](65..90)
+            L=[char[]](97..122)
             N=[char[]](48..57)
             S=([char[]](33..47)+[char[]](58..64)+[char[]](91..96)+[char[]](123..126))
           }
 
           $p=@()
-          $p+=$chars.U|Get-Random -Count 4
-          $p+=$chars.L|Get-Random -Count 4
-          $p+=$chars.N|Get-Random -Count 4
-          $p+=$chars.S|Get-Random -Count 4
-          $pass=-join($p|Sort-Object{Get-Random})
+          $p+=$chars.U | Get-Random -Count 4
+          $p+=$chars.L | Get-Random -Count 4
+          $p+=$chars.N | Get-Random -Count 4
+          $p+=$chars.S | Get-Random -Count 4
+          $pass = -join ($p | Sort-Object { Get-Random })
 
-          $sec=ConvertTo-SecureString $pass -AsPlainText -Force
+          $sec = ConvertTo-SecureString $pass -AsPlainText -Force
+
           if (-not (Get-LocalUser RDP -ErrorAction SilentlyContinue)) {
             New-LocalUser RDP -Password $sec -AccountNeverExpires
           }
@@ -71,13 +91,20 @@ jobs:
           echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
+      # =========================
+      # WORK DIRECTORY
+      # =========================
       - name: ZDNCH - Prepare Work Directory
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path C:\ZDNCH | Out-Null
           takeown /f C:\ZDNCH /r /d y | Out-Null
           icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
+          icacls C:\ZDNCH /grant RDP:F /t | Out-Null
 
+      # =========================
+      # INSTALL TAILSCALE
+      # =========================
       - name: ZDNCH - Install Tailscale
         shell: pwsh
         run: |
@@ -87,26 +114,29 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/quiet","/norestart" -Wait
           Remove-Item $msi -Force
 
-      - name: ZDNCH - Prepare Work Directory
+      # =========================
+      # CONNECT TAILSCALE
+      # =========================
+      - name: ZDNCH - Connect Tailscale
         shell: pwsh
         run: |
-         New-Item -ItemType Directory -Force -Path C:\ZDNCH | Out-Null
-
-         takeown /f C:\ZDNCH /r /d y | Out-Null
-
-         icacls C:\ZDNCH /grant Administrators:F /t | Out-Null
-         icacls C:\ZDNCH /grant RDP:F /t | Out-Null
-
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=rdp-zdnch-$env:GITHUB_RUN_ID
 
           $ip=$null; $i=0
           while (-not $ip -and $i -lt 10) {
             $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-            Start-Sleep 5; $i++
+            Start-Sleep 5
+            $i++
           }
 
           if (-not $ip) { throw "Tailscale IP not assigned" }
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
+      # =========================
+      # FIREWALL (TAILSCALE ONLY)
+      # =========================
       - name: ZDNCH - Firewall (RDP via Tailscale only)
         shell: pwsh
         run: |
@@ -114,13 +144,16 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
 
+      # =========================
+      # KEEP ALIVE
+      # =========================
       - name: ZDNCH - Keep Alive
         shell: pwsh
         run: |
           Write-Host "==============================="
           Write-Host "RDP_ZDNCH READY (TAILSCALE)"
-          Write-Host "Address : $env:TAILSCALE_IP"
-          Write-Host "User    : $env:RDP_USER"
-          Write-Host "Pass    : $env:RDP_PASS"
+          Write-Host "IP   : $env:TAILSCALE_IP"
+          Write-Host "User : $env:RDP_USER"
+          Write-Host "Pass : $env:RDP_PASS"
           Write-Host "==============================="
           while ($true) { Start-Sleep 300 }
