@@ -23,7 +23,6 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt install -y \
-          curl jq docker.io \
           openjdk-21-jre-headless \
           openssh-server
 
